@@ -4,12 +4,12 @@
 
 MY_HOSTNAME=openshift.example.com
 
-# rhel-7-server-extras-rpms is required for docker-io
+# rhel-7-server-extras-rpms is required for docker
 register_channels rhel-7-server-rpms rhel-7-server-extras-rpms rhel-7-server-ose-3.1-rpms
 #register_channels rhel-7-server-rpms rhel-7-server-extras-rpms
 #curl -o /etc/yum.repos.d/auto-RH7-RHAOS-3.1.repo http://buildvm-devops.usersys.redhat.com/puddle/build/OpenShiftEnterpriseErrata/3.1/latest/RH7-RHAOS-3.1.repo
 
-yum_install atomic-openshift-utils bind-utils docker-io git httpd-tools lsof PyPAM python-requests PyYAML net-tools nmap-ncat strace tcpdump unzip
+yum_install atomic-openshift-utils bind-utils docker-1.8.2 git httpd-tools lsof PyPAM python-requests PyYAML net-tools nmap-ncat strace tcpdump unzip
 
 #sed -i -e 's/registry.access.redhat.com/rcm-img-docker01.build.eng.bos.redhat.com:5001/' /etc/sysconfig/docker
 
@@ -120,11 +120,38 @@ update-ca-trust
 
 firefox_set_homepage https://$MY_HOSTNAME:8443/
 
-sed -i -e '/-A FORWARD/ a\
+sed -i -e '/^:OS_FIREWALL_ALLOW / a\
 -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 5900 -j ACCEPT' /etc/sysconfig/iptables
 
 ./install-logging.sh
 ./install-metrics.sh
+
+mkdir /export
+for ((i=1; i<=10; i++)); do
+  mkdir -m 0777 /export/vol$i
+  echo "/export/vol$i *(rw,root_squash)" >>/etc/exports
+
+  oc create -f - <<EOF
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: vol$i
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+  - ReadOnlyMany
+  - ReadWriteOnce
+  - ReadWriteMany
+  nfs:
+    path: /export/vol$i
+    server: openshift.example.com
+  persistentVolumeReclaimPolicy: Recycle
+EOF
+done
+
+# bz1293805, should be fixed in 3.2
+oadm policy add-scc-to-user hostmount-anyuid system:serviceaccount:openshift-infra:pv-recycler-controller
 
 cat >>/usr/local/bin/demobuilder-cleanup.sh <<'EOF'
 systemctl stop atomic-openshift-node.service
