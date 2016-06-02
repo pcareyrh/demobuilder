@@ -1,0 +1,33 @@
+#!/bin/bash -ex
+
+. vm-functions
+
+register_channels rhel-7-server-rpms rhel-7-server-rh-common-rpms rhel-7-server-openstack-8-rpms rhel-7-server-extras-rpms
+yum install -y iptables-services openstack-packstack
+
+for svc in NetworkManager firewalld; do
+  systemctl disable $svc.service
+  systemctl stop $svc.service
+done
+
+for svc in iptables ip6tables network; do
+  systemctl enable $svc.service
+  systemctl start $svc.service
+done
+
+packstack --cinder-volumes-size=10G --install-hosts=127.0.0.1 --keystone-admin-passwd=admin --keystone-demo-passwd=demo --nagios-install=n --novacompute-privif=lo --novanetwork-privif=lo --os-heat-install=y --provision-ovs-bridge=y
+
+cp ifcfg-{br-ex,eth0} /etc/sysconfig/network-scripts
+
+for svc in demobuilder-openstack-netconf-early demobuilder-openstack-netconf; do
+  cp $svc.sh /usr/local/libexec
+  cp $svc.service /lib/systemd/system
+  systemctl enable $svc
+done
+
+cp /root/keystonerc_* /home/demo
+chown -R demo:demo /home/demo
+
+sed -i -e 's/^virt_type=.*/virt_type=kvm/' /etc/nova/nova.conf
+
+firefox_set_homepage http://localhost/
